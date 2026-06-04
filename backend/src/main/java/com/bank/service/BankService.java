@@ -1,8 +1,13 @@
 package com.bank.service;
 
+import com.bank.entity.LoginEntity;
+import com.bank.repository.LoginRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import com.bank.event.TransactionEvent;
+import com.bank.event.TransactionEventPublisher;
 
 import java.util.*;
 
@@ -11,6 +16,12 @@ public class BankService {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private LoginRepository loginRepository;
+
+    @Autowired
+    private TransactionEventPublisher eventPublisher;
 
     // Helper to generate a new Form Number
     public String generateFormNumber() {
@@ -119,14 +130,23 @@ public class BankService {
     }
 
     // Deposit Transaction
+    @Transactional
     public void deposit(String pin, String amount) {
+        loginRepository.findByPinForUpdate(pin)
+            .orElseThrow(() -> new IllegalArgumentException("Invalid PIN or account not active"));
+
         String dateStr = new Date().toString();
-        String query = "INSERT INTO bank (pin, date, type, amount) VALUES (?, ?, 'Deposit', ?)";
-        jdbcTemplate.update(query, pin, dateStr, amount);
+        TransactionEvent event = new TransactionEvent(pin, "Deposit", amount, dateStr);
+        eventPublisher.publish(event);
     }
 
     // Withdrawal Transaction (Standard)
+    @Transactional
     public boolean withdraw(String pin, String amount) {
+        // Acquire pessimistic write lock on the customer's account row
+        loginRepository.findByPinForUpdate(pin)
+            .orElseThrow(() -> new IllegalArgumentException("Invalid PIN or account not active"));
+
         int balance = getBalance(pin);
         int withdrawAmount = Integer.parseInt(amount);
         if (balance < withdrawAmount) {
@@ -134,13 +154,18 @@ public class BankService {
         }
         String dateStr = new Date().toString();
         // Exact type string: 'Withdrawl'
-        String query = "INSERT INTO bank (pin, date, type, amount) VALUES (?, ?, 'Withdrawl', ?)";
-        jdbcTemplate.update(query, pin, dateStr, amount);
+        TransactionEvent event = new TransactionEvent(pin, "Withdrawl", amount, dateStr);
+        eventPublisher.publish(event);
         return true;
     }
 
     // Fast Cash Transaction
+    @Transactional
     public boolean fastCash(String pin, String amount) {
+        // Acquire pessimistic write lock on the customer's account row
+        loginRepository.findByPinForUpdate(pin)
+            .orElseThrow(() -> new IllegalArgumentException("Invalid PIN or account not active"));
+
         int balance = getBalance(pin);
         int withdrawAmount = Integer.parseInt(amount);
         if (balance < withdrawAmount) {
@@ -148,8 +173,8 @@ public class BankService {
         }
         String dateStr = new Date().toString();
         // Exact type string: 'withdrawl' (lowercase)
-        String query = "INSERT INTO bank (pin, date, type, amount) VALUES (?, ?, 'withdrawl', ?)";
-        jdbcTemplate.update(query, pin, dateStr, amount);
+        TransactionEvent event = new TransactionEvent(pin, "withdrawl", amount, dateStr);
+        eventPublisher.publish(event);
         return true;
     }
 
