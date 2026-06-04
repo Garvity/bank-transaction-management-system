@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+import com.bank.util.HashUtil;
 import java.util.List;
 import java.util.Map;
 
@@ -33,11 +34,11 @@ public class EventSourcingLedgerTest {
         String testForm = " 8877";
 
         // Clean up any existing data
-        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", testPin);
+        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", HashUtil.sha256(testPin));
         jdbcTemplate.update("DELETE FROM login WHERE card_number = ?", testCard);
 
         // Save fresh login row for pin locking/lookup
-        LoginEntity login = new LoginEntity(testForm, testCard, testPin);
+        LoginEntity login = new LoginEntity(testForm, testCard, HashUtil.hashBCrypt(testPin), HashUtil.sha256(testPin));
         loginRepository.save(login);
 
         // Verify starting balance is 0
@@ -48,7 +49,7 @@ public class EventSourcingLedgerTest {
         bankService.deposit(testPin, "5000");
 
         // Assert: Event was published and stored in the database
-        List<Map<String, Object>> events = jdbcTemplate.queryForList("SELECT type, amount FROM bank WHERE pin = ?", testPin);
+        List<Map<String, Object>> events = jdbcTemplate.queryForList("SELECT type, amount FROM bank WHERE pin = ?", HashUtil.sha256(testPin));
         assertEquals(1, events.size(), "Should have exactly 1 transaction event persisted");
         assertEquals("Deposit", events.get(0).get("type"));
         assertEquals("5000", events.get(0).get("amount"));
@@ -66,7 +67,7 @@ public class EventSourcingLedgerTest {
         assertEquals(3000, balanceAfterWithdraw, "Balance should drop to 3000");
 
         // Assert: Two events exist in store
-        events = jdbcTemplate.queryForList("SELECT type, amount FROM bank WHERE pin = ? ORDER BY date ASC", testPin);
+        events = jdbcTemplate.queryForList("SELECT type, amount FROM bank WHERE pin = ? ORDER BY date ASC", HashUtil.sha256(testPin));
         assertEquals(2, events.size(), "Should have exactly 2 transaction events persisted");
         assertEquals("Deposit", events.get(0).get("type"));
         assertEquals("Withdrawl", events.get(1).get("type"));
@@ -84,11 +85,11 @@ public class EventSourcingLedgerTest {
         assertFalse(overdrawSuccess, "Withdrawal of Rs. 3000 should fail due to insufficient funds");
 
         // Assert: No new event logged for failed transaction
-        events = jdbcTemplate.queryForList("SELECT type, amount FROM bank WHERE pin = ?", testPin);
+        events = jdbcTemplate.queryForList("SELECT type, amount FROM bank WHERE pin = ?", HashUtil.sha256(testPin));
         assertEquals(3, events.size(), "Should still have exactly 3 events");
 
         // Clean up test data
-        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", testPin);
+        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", HashUtil.sha256(testPin));
         jdbcTemplate.update("DELETE FROM login WHERE card_number = ?", testCard);
     }
 }

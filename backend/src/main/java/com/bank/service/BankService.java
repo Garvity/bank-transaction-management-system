@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.bank.event.TransactionEvent;
 import com.bank.event.TransactionEventPublisher;
+import com.bank.util.EncryptionUtil;
+import com.bank.util.HashUtil;
 
 import java.util.*;
 
@@ -44,10 +46,22 @@ public class BankService {
     // Auth: Login validation
     public Map<String, Object> validateLogin(String cardNumber, String pin) {
         String cleanCardNumber = cardNumber != null ? cardNumber.replaceAll("\\s|-", "") : "";
-        String query = "SELECT * FROM login WHERE card_number = ? AND pin = ?";
-        List<Map<String, Object>> users = jdbcTemplate.queryForList(query, cleanCardNumber, pin);
+        String query = "SELECT * FROM login WHERE card_number = ?";
+        List<Map<String, Object>> users = jdbcTemplate.queryForList(query, cleanCardNumber);
         if (!users.isEmpty()) {
-            return users.get(0);
+            Map<String, Object> dbUser = users.get(0);
+            String dbHash = (String) getIgnoreCase(dbUser, "pin");
+            if (HashUtil.verifyBCrypt(pin, dbHash)) {
+                Map<String, Object> result = new HashMap<>();
+                for (Map.Entry<String, Object> entry : dbUser.entrySet()) {
+                    if (entry.getKey().equalsIgnoreCase("pin")) {
+                        result.put(entry.getKey(), pin);
+                    } else {
+                        result.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                return result;
+            }
         }
         return null;
     }
@@ -75,6 +89,8 @@ public class BankService {
     public void saveSignupStep2(Map<String, String> data) {
         String query = "INSERT INTO Signuptwo (formno, rel, cate, inc, edu, occ, pan, addhar, scitizen, eAccount) " +
                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        String encryptedPan = EncryptionUtil.encrypt(data.get("pan"));
+        String encryptedAddhar = EncryptionUtil.encrypt(data.get("addhar"));
         jdbcTemplate.update(query,
                 data.get("formno"),
                 data.get("rel"),
@@ -82,8 +98,8 @@ public class BankService {
                 data.get("inc"),
                 data.get("edu"),
                 data.get("occ"),
-                data.get("pan"),
-                data.get("addhar"),
+                encryptedPan,
+                encryptedAddhar,
                 data.get("scitizen"),
                 data.get("eAccount")
         );
@@ -95,16 +111,19 @@ public class BankService {
         long first7 = (ran.nextLong() % 90000000L) + 1409963000000000L;
         String cardno = "" + Math.abs(first7);
 
-        long first3 = (ran.nextLong() % 9000L) + 1000L;
-        String pin = "" + Math.abs(first3);
+        int first3 = ran.nextInt(9000) + 1000;
+        String pin = String.valueOf(first3);
 
-        // Inserts into signupthree
+        String hashedBcryptPin = HashUtil.hashBCrypt(pin);
+        String hashedLookupPin = HashUtil.sha256(pin);
+
+        // Inserts into signupthree (store BCrypt hash)
         String q1 = "INSERT INTO signupthree (formno, atype, cardno, pin, fac) VALUES (?, ?, ?, ?, ?)";
-        jdbcTemplate.update(q1, formno, accountType, cardno, pin, facilities);
+        jdbcTemplate.update(q1, formno, accountType, cardno, hashedBcryptPin, facilities);
 
-        // Inserts into login
-        String q2 = "INSERT INTO login (formno, card_number, pin) VALUES (?, ?, ?)";
-        jdbcTemplate.update(q2, formno, cardno, pin);
+        // Inserts into login (store BCrypt hash & SHA-256 lookup hash)
+        String q2 = "INSERT INTO login (formno, card_number, pin, pin_lookup_hash) VALUES (?, ?, ?, ?)";
+        jdbcTemplate.update(q2, formno, cardno, hashedBcryptPin, hashedLookupPin);
 
         Map<String, String> credentials = new HashMap<>();
         credentials.put("cardNumber", cardno);
@@ -114,8 +133,9 @@ public class BankService {
 
     // Calculate Balance
     public int getBalance(String pin) {
+        String sha256Pin = HashUtil.sha256(pin);
         String query = "SELECT type, amount FROM bank WHERE pin = ?";
-        List<Map<String, Object>> transactions = jdbcTemplate.queryForList(query, pin);
+        List<Map<String, Object>> transactions = jdbcTemplate.queryForList(query, sha256Pin);
         int balance = 0;
         for (Map<String, Object> tx : transactions) {
             String type = (String) getIgnoreCase(tx, "type");
@@ -132,11 +152,12 @@ public class BankService {
     // Deposit Transaction
     @Transactional
     public void deposit(String pin, String amount) {
-        loginRepository.findByPinForUpdate(pin)
+        String sha256Pin = HashUtil.sha256(pin);
+        loginRepository.findByPinLookupHashForUpdate(sha256Pin)
             .orElseThrow(() -> new IllegalArgumentException("Invalid PIN or account not active"));
 
         String dateStr = new Date().toString();
-        TransactionEvent event = new TransactionEvent(pin, "Deposit", amount, dateStr);
+        TransactionEvent event = new TransactionEvent(sha256Pin, "Deposit", amount, dateStr);
         eventPublisher.publish(event);
     }
 
@@ -144,7 +165,8 @@ public class BankService {
     @Transactional
     public boolean withdraw(String pin, String amount) {
         // Acquire pessimistic write lock on the customer's account row
-        loginRepository.findByPinForUpdate(pin)
+        String sha256Pin = HashUtil.sha256(pin);
+        loginRepository.findByPinLookupHashForUpdate(sha256Pin)
             .orElseThrow(() -> new IllegalArgumentException("Invalid PIN or account not active"));
 
         int balance = getBalance(pin);
@@ -154,7 +176,7 @@ public class BankService {
         }
         String dateStr = new Date().toString();
         // Exact type string: 'Withdrawl'
-        TransactionEvent event = new TransactionEvent(pin, "Withdrawl", amount, dateStr);
+        TransactionEvent event = new TransactionEvent(sha256Pin, "Withdrawl", amount, dateStr);
         eventPublisher.publish(event);
         return true;
     }
@@ -163,7 +185,8 @@ public class BankService {
     @Transactional
     public boolean fastCash(String pin, String amount) {
         // Acquire pessimistic write lock on the customer's account row
-        loginRepository.findByPinForUpdate(pin)
+        String sha256Pin = HashUtil.sha256(pin);
+        loginRepository.findByPinLookupHashForUpdate(sha256Pin)
             .orElseThrow(() -> new IllegalArgumentException("Invalid PIN or account not active"));
 
         int balance = getBalance(pin);
@@ -173,29 +196,42 @@ public class BankService {
         }
         String dateStr = new Date().toString();
         // Exact type string: 'withdrawl' (lowercase)
-        TransactionEvent event = new TransactionEvent(pin, "withdrawl", amount, dateStr);
+        TransactionEvent event = new TransactionEvent(sha256Pin, "withdrawl", amount, dateStr);
         eventPublisher.publish(event);
         return true;
     }
 
     // Pin Change Transaction
     public void changePin(String oldPin, String newPin) {
-        String q1 = "UPDATE bank SET pin = ? WHERE pin = ?";
-        String q2 = "UPDATE login SET pin = ? WHERE pin = ?";
-        String q3 = "UPDATE signupthree SET pin = ? WHERE pin = ?";
+        String oldSha256 = HashUtil.sha256(oldPin);
+        String newSha256 = HashUtil.sha256(newPin);
+        String newBcrypt = HashUtil.hashBCrypt(newPin);
 
-        jdbcTemplate.update(q1, newPin, oldPin);
-        jdbcTemplate.update(q2, newPin, oldPin);
-        jdbcTemplate.update(q3, newPin, oldPin);
+        String cardQuery = "SELECT card_number, formno FROM login WHERE pin_lookup_hash = ?";
+        List<Map<String, Object>> cardList = jdbcTemplate.queryForList(cardQuery, oldSha256);
+        if (!cardList.isEmpty()) {
+            String cardno = (String) getIgnoreCase(cardList.get(0), "card_number");
+            String formno = (String) getIgnoreCase(cardList.get(0), "formno");
+
+            String q1 = "UPDATE bank SET pin = ? WHERE pin = ?";
+            jdbcTemplate.update(q1, newSha256, oldSha256);
+
+            String q2 = "UPDATE login SET pin = ?, pin_lookup_hash = ? WHERE card_number = ?";
+            jdbcTemplate.update(q2, newBcrypt, newSha256, cardno);
+
+            String q3 = "UPDATE signupthree SET pin = ? WHERE formno = ?";
+            jdbcTemplate.update(q3, newBcrypt, formno);
+        }
     }
 
     // Retrieve Mini Statement info
     public Map<String, Object> getMiniStatement(String pin) {
         Map<String, Object> statementData = new HashMap<>();
+        String sha256Pin = HashUtil.sha256(pin);
 
         // Get Card Number
-        String cardQuery = "SELECT card_number FROM login WHERE pin = ?";
-        List<Map<String, Object>> cardList = jdbcTemplate.queryForList(cardQuery, pin);
+        String cardQuery = "SELECT card_number FROM login WHERE pin_lookup_hash = ?";
+        List<Map<String, Object>> cardList = jdbcTemplate.queryForList(cardQuery, sha256Pin);
         String maskedCard = "Card Number: N/A";
         if (!cardList.isEmpty()) {
             String fullCard = (String) getIgnoreCase(cardList.get(0), "card_number");
@@ -207,7 +243,7 @@ public class BankService {
 
         // Get Transactions
         String txQuery = "SELECT date, type, amount FROM bank WHERE pin = ?";
-        List<Map<String, Object>> rawTransactions = jdbcTemplate.queryForList(txQuery, pin);
+        List<Map<String, Object>> rawTransactions = jdbcTemplate.queryForList(txQuery, sha256Pin);
         List<Map<String, String>> transactionsList = new ArrayList<>();
         int balance = 0;
 

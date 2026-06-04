@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS signupthree (
     formno VARCHAR(50) NOT NULL,
     atype VARCHAR(100),
     cardno VARCHAR(50),
-    pin VARCHAR(50),
+    pin VARCHAR(255),
     fac VARCHAR(255),
     PRIMARY KEY (formno)
 );
@@ -39,12 +39,13 @@ CREATE TABLE IF NOT EXISTS signupthree (
 CREATE TABLE IF NOT EXISTS login (
     formno VARCHAR(50),
     card_number VARCHAR(50) NOT NULL,
-    pin VARCHAR(50),
+    pin VARCHAR(255),
+    pin_lookup_hash VARCHAR(100),
     PRIMARY KEY (card_number)
 );
 
 CREATE TABLE IF NOT EXISTS bank (
-    pin VARCHAR(50),
+    pin VARCHAR(100),
     date VARCHAR(100),
     type VARCHAR(50),
     amount VARCHAR(50)

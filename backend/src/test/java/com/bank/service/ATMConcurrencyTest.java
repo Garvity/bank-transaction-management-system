@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.bank.util.HashUtil;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
@@ -37,17 +38,17 @@ public class ATMConcurrencyTest {
         String testForm = " 9988";
 
         // Clean up any existing data
-        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", testPin);
+        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", HashUtil.sha256(testPin));
         jdbcTemplate.update("DELETE FROM login WHERE card_number = ?", testCard);
 
         // Insert fresh credentials
-        LoginEntity login = new LoginEntity(testForm, testCard, testPin);
+        LoginEntity login = new LoginEntity(testForm, testCard, HashUtil.hashBCrypt(testPin), HashUtil.sha256(testPin));
         loginRepository.save(login);
 
         // Deposit Rs. 4,000 starting balance
         // Note: deposit calls findByPinForUpdate, so we need a transaction to do this or run direct SQL.
         // We can run direct SQL for setup to avoid locking setup.
-        jdbcTemplate.update("INSERT INTO bank (pin, date, type, amount) VALUES (?, 'SetupDate', 'Deposit', '4000')", testPin);
+        jdbcTemplate.update("INSERT INTO bank (pin, date, type, amount) VALUES (?, 'SetupDate', 'Deposit', '4000')", HashUtil.sha256(testPin));
 
         // Verify initial balance
         int initialBalance = bankService.getBalance(testPin);
@@ -85,7 +86,7 @@ public class ATMConcurrencyTest {
         assertEquals(1000, finalBalance, "Final balance should be exactly 1000, preventing the double-spend!");
 
         // Clean up test data
-        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", testPin);
+        jdbcTemplate.update("DELETE FROM bank WHERE pin = ?", HashUtil.sha256(testPin));
         jdbcTemplate.update("DELETE FROM login WHERE card_number = ?", testCard);
     }
 }

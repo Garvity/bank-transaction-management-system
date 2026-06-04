@@ -16,6 +16,9 @@ public class LoginEntity {
     private String formno;
     private String pin;
 
+    @Column(name = "pin_lookup_hash")
+    private String pinLookupHash;
+
     // Default Constructor
     public LoginEntity() {}
 
@@ -23,6 +26,13 @@ public class LoginEntity {
         this.formno = formno;
         this.cardNumber = cardNumber;
         this.pin = pin;
+    }
+
+    public LoginEntity(String formno, String cardNumber, String pin, String pinLookupHash) {
+        this.formno = formno;
+        this.cardNumber = cardNumber;
+        this.pin = pin;
+        this.pinLookupHash = pinLookupHash;
     }
 
     public String getCardNumber() {
@@ -47,5 +57,13 @@ public class LoginEntity {
 
     public void setPin(String pin) {
         this.pin = pin;
+    }
+
+    public String getPinLookupHash() {
+        return pinLookupHash;
+    }
+
+    public void setPinLookupHash(String pinLookupHash) {
+        this.pinLookupHash = pinLookupHash;
     }
 }

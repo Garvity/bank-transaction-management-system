@@ -12,8 +12,8 @@ import java.util.Optional;
 public interface LoginRepository extends JpaRepository<LoginEntity, String> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT l FROM LoginEntity l WHERE l.pin = :pin")
-    Optional<LoginEntity> findByPinForUpdate(@Param("pin") String pin);
+    @Query("SELECT l FROM LoginEntity l WHERE l.pinLookupHash = :hash")
+    Optional<LoginEntity> findByPinLookupHashForUpdate(@Param("hash") String hash);
 
-    Optional<LoginEntity> findByPin(String pin);
+    Optional<LoginEntity> findByPinLookupHash(String hash);
 }
