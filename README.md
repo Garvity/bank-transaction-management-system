@@ -30,6 +30,7 @@ bank-management-web/
 - **Spring Web**: Exposes clean, validation-safe REST controllers.
 - **Spring Data JPA & Hibernate**: Integrated alongside JDBC for advanced transactional entity mapping and query configuration.
 - **Pessimistic Concurrency Locking**: Implements row-level locking (`@Lock(LockModeType.PESSIMISTIC_WRITE)`) on credentials session data to block concurrent ATM withdrawal race conditions and eliminate double-spending risks.
+- **PCI-DSS Compliance Cryptography**: Secures customer PAN and Aadhar details at rest using AES-256-CBC encryption, and hashes PIN logins using BCrypt to satisfy financial data protection requirements.
 - **Event-Sourced Transaction Ledger**: Transaction actions (Deposits, Withdrawals, Fast Cash) are processed as immutable Event streams published through an internal application message broker and recorded in the database event store. Balances are derived dynamically by replaying the event logs.
 - **Spring JDBC (`JdbcTemplate`)**: Replicates the exact raw SQL database updates and structural parameters matching the legacy desktop configuration.
 - **H2 In-Memory & MySQL support**: Easily switchable via Spring profile configurations (`spring.profiles.active=dev` vs `prod`).
@@ -45,18 +46,22 @@ bank-management-web/
 
 ---
 
-## Database Schemas & Data Integrity
+## Database Schemas & Data Security (PCI-DSS Compliance)
 
-The backend automatically creates the following tables on startup via `schema.sql`:
+The backend automatically manages schemas on startup via `schema.sql` and includes a self-healing **`DatabaseSchemaMigrationRunner`** (which alters pre-existing database columns for secure hash sizes without data loss).
 
-1. **`signup`**: Form number, personal details (name, DOB, email, marital status, address, city, state).
-2. **`Signuptwo`**: Form number, additional details (religion, category, income, occupation, PAN, Aadhar, Senior/Existing status).
-3. **`signupthree`**: Form number, account type, card number, PIN, requested services list.
-4. **`login`**: Credential entries mapping form number, generated card number, and active PIN.
-5. **`bank`**: Transaction logs recording PIN, Date (representation of `java.util.Date`), Type (`'Deposit'`, `'Withdrawl'`, or `'withdrawl'`), and Amount.
+### Table Schema and Cryptography Rules
 
-> [!NOTE]
-> All legacy database quirks are preserved exactly—such as the lowercase `'withdrawl'` tag inserted during Fast Cash versus the Capital `'Withdrawl'` tag inserted in Custom Withdrawals, ensuring running balances sum correctly.
+1. **`signup`**: Stores personal registration details.
+2. **`Signuptwo`**: Stores additional details. **PCI-DSS Compliance Layer**: The `pan` (PAN number) and `addhar` (Aadhar number) values are encrypted at rest using AES-256-CBC with standard PKCS5 padding.
+3. **`signupthree`**: Stores account types and services. **Security Layer**: The PIN column stores the salted BCrypt hash of the user's PIN.
+4. **`login`**: Maps login credentials. 
+   - **`pin`**: Stores the salted BCrypt hash of the PIN.
+   - **`pin_lookup_hash`**: Stores a deterministic SHA-256 hash of the PIN (used to safely link transactions without exposing plain-text keys).
+5. **`bank`**: Core ledger event log.
+   - **`pin`**: Stores the deterministic SHA-256 hash of the transaction PIN (protecting customer identity at rest).
+   - **Ledger Invariants**: Dynamic balance computation sums deposits and subtracts withdrawals by querying this table. All legacy quirks are preserved (e.g. capital `'Withdrawl'` vs lowercase `'withdrawl'` for fast cash).
+
 
 ---
 
