@@ -28,11 +28,13 @@ bank-management-web/
 
 ### Backend (Spring Boot 3.2.5)
 - **Spring Web**: Exposes clean, validation-safe REST controllers.
-- **Spring JDBC (`JdbcTemplate`)**: Replicates the exact raw SQL insert, select, and update queries from the original desktop version.
-- **MySQL Driver**: Connects to the original `bankSystem` database.
-- **H2 Support**: Configured an in-memory dev profile database for easy sandbox runs without local MySQL setup.
-- **CORS Config**: Enabled secure origin mappings for local development servers.
-- **JUnit 5 Testing**: Unit test suite using JUnit Jupiter explicitly verified.
+- **Spring Data JPA & Hibernate**: Integrated alongside JDBC for advanced transactional entity mapping and query configuration.
+- **Pessimistic Concurrency Locking**: Implements row-level locking (`@Lock(LockModeType.PESSIMISTIC_WRITE)`) on credentials session data to block concurrent ATM withdrawal race conditions and eliminate double-spending risks.
+- **Event-Sourced Transaction Ledger**: Transaction actions (Deposits, Withdrawals, Fast Cash) are processed as immutable Event streams published through an internal application message broker and recorded in the database event store. Balances are derived dynamically by replaying the event logs.
+- **Spring JDBC (`JdbcTemplate`)**: Replicates the exact raw SQL database updates and structural parameters matching the legacy desktop configuration.
+- **H2 In-Memory & MySQL support**: Easily switchable via Spring profile configurations (`spring.profiles.active=dev` vs `prod`).
+- **CORS Config**: Configured cross-origin resource sharing policies for React application bindings.
+- **JUnit 5 Integration Tests**: Includes automated multi-threaded test suites validating lock execution latency and event delivery compliance.
 
 ### Frontend (React + Vite)
 - **State Router**: Implements layout toggles mimicking JFrame visibility transitions (`.setVisible(false)`).
@@ -120,3 +122,27 @@ Ensure the following tools are installed on your machine:
    Vite will start the client interface on `http://localhost:5173`.
 
 4. Open `http://localhost:5173` in your browser to start your transactions!
+
+---
+
+### 3. Run Backend via Docker
+
+You can containerize the backend to run it independently without needing Java or Maven pre-installed on your local environment:
+
+1. **Build the Docker Image**:
+   Navigate to the `backend` directory and run:
+   ```bash
+   docker build -t bank-management-backend .
+   ```
+
+2. **Run the Container**:
+   Start the backend container (exposing port `8080`):
+   ```bash
+   docker run -d -p 8080:8080 --name bank-backend bank-management-backend
+   ```
+
+3. **To Override active profiles (e.g. targeting MySQL instead of in-memory H2)**:
+   ```bash
+   docker run -d -p 8080:8080 --name bank-backend -e SPRING_PROFILES_ACTIVE=prod bank-management-backend
+   ```
+
